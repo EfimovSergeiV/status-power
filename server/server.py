@@ -21,6 +21,9 @@ TELEGRAM_TOKEN = getenv("TELEGRAM_TOKEN", random_len=16)
 TELEGRAM_CHAT_ID = getenv("TELEGRAM_CHAT_ID", default="0")
 PING_TIMEOUT = int(getenv("PING_TIMEOUT", default="180"))
 
+print(f"TELEGRAM_TOKEN: {TELEGRAM_TOKEN}")
+print(f"TELEGRAM_CHAT_ID: {TELEGRAM_CHAT_ID}")
+print(f"PING_TIMEOUT: {PING_TIMEOUT}")
 
 last_ping = None
 power_off_notified = False
