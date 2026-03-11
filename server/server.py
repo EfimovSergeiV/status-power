@@ -62,4 +62,5 @@ async def startup():
 async def ping():
     global last_ping
     last_ping = datetime.utcnow()
+    notify(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, "📶 Ping received!")
     return {"status": "ok"}
