@@ -2,6 +2,8 @@ import os, asyncio, secrets
 from fastapi import FastAPI
 from datetime import datetime
 
+from tg_alert import notify
+
 app = FastAPI()
 
 def getenv(name, default=None, random_len=None):
@@ -42,10 +44,12 @@ async def monitor():
 
         if diff > PING_TIMEOUT and not power_off_notified:
             print("Power OFF")
+            notify(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, "⚠️ Power OFF detected!")
             power_off_notified = True
 
         if diff <= PING_TIMEOUT and power_off_notified:
             print("Power ON")
+            notify(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, "✅ Power ON detected!")
             power_off_notified = False
 
 
