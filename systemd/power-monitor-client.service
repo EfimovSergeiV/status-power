@@ -1,0 +1,22 @@
+[Unit]
+Description=Power Monitor Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=username
+WorkingDirectory=/opt/power-monitor-client
+
+EnvironmentFile=-/opt/power-monitor-client/.env
+
+ExecStart=/usr/bin/python3 /opt/power-monitor-client/client.py
+
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
