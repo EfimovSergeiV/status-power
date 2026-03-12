@@ -1,7 +1,7 @@
 import time, os, requests
 
 
-SERVER = os.getenv("SERVER_URL", "http://your_vps_ip:8000/ping")
+SERVER = os.getenv("SERVER_URL", "https://status.domain.name/ping")
 PING_INTERVAL = int(os.getenv("PING_INTERVAL", "30"))
 
 while True:
