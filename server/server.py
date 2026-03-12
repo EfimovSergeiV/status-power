@@ -1,79 +1,138 @@
-import os, asyncio, secrets, requests
-from fastapi import FastAPI, Request
-from datetime import datetime
+import os
+import asyncio
+import secrets
+import httpx
+from fastapi import FastAPI
+from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 
-from tg_alert import notify
 
-app = FastAPI()
-
-
-def getenv(name, default=None, random_len=None):
-    """ Возвращает переменную окружения """
+def getenv(name, default=None):
     value = os.getenv(name)
-
     if value:
         return value
-    if random_len:
-        return secrets.token_hex(random_len)
-
-    return default
-
+    if default:
+        return default
+    raise RuntimeError(f"{name} not set")
 
 
-TELEGRAM_TOKEN = getenv("TELEGRAM_TOKEN", random_len=16)
-PING_TIMEOUT = int(getenv("PING_TIMEOUT", default="180"))
+TELEGRAM_TOKEN = getenv("TELEGRAM_TOKEN")
+PING_TIMEOUT = int(getenv("PING_TIMEOUT", "180"))
 
 
-def get_chat_ids():
-    response = requests.get(f"https://api.telegram.org/bot{ TELEGRAM_TOKEN }/getUpdates").json()
-    messages = response.get("result")
-    
-    if messages:
+class AppState:
 
-        for msg in messages:
-            chat = msg.get("message").get("chat")
-            id, username = chat.get("id"), chat.get("username")
-
-            if id not in chat_ids:
-                chat_ids.append(id)
+    def __init__(self):
+        self.last_ping: datetime | None = None
+        self.power_off_notified = False
+        self.chat_ids = set()
+        self.last_update_id = 0
+        self.stop_event = asyncio.Event()
 
 
-last_ping = None
-power_off_notified = False
-chat_ids = []
+state = AppState()
 
-async def monitor():
-    global last_ping, power_off_notified, chat_ids
 
-    get_chat_ids()
+async def notify(client, text):
 
-    while True:
+    for chat_id in state.chat_ids:
+
+        try:
+            await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text
+                }
+            )
+
+        except Exception as e:
+            print("notify error:", e)
+
+
+async def telegram_polling(client):
+
+    while not state.stop_event.is_set():
+
+        try:
+
+            resp = await client.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+                params={
+                    "offset": state.last_update_id + 1,
+                    "timeout": 30
+                },
+                timeout=35
+            )
+
+            data = resp.json()
+
+            for update in data.get("result", []):
+
+                state.last_update_id = update["update_id"]
+
+                msg = update.get("message")
+                if not msg:
+                    continue
+
+                chat = msg.get("chat")
+                state.chat_ids.add(chat["id"])
+
+        except Exception as e:
+            print("telegram polling error:", e)
+            await asyncio.sleep(5)
+
+
+async def monitor(client):
+
+    while not state.stop_event.is_set():
+
         await asyncio.sleep(60)
 
-        if last_ping is None:
+        if state.last_ping is None:
             continue
 
-        diff = (datetime.utcnow() - last_ping).total_seconds()
+        diff = (datetime.now(timezone.utc) - state.last_ping).total_seconds()
 
-        if diff > PING_TIMEOUT and not power_off_notified:
+        if diff > PING_TIMEOUT and not state.power_off_notified:
+
             print("Power OFF")
-            notify(TELEGRAM_TOKEN, chat_ids, "⚠️ Power OFF detected!")
-            power_off_notified = True
 
-        if diff <= PING_TIMEOUT and power_off_notified:
+            await notify(client, "⚠️ Power OFF detected!")
+            state.power_off_notified = True
+
+        if diff <= PING_TIMEOUT and state.power_off_notified:
+
             print("Power ON")
-            notify(TELEGRAM_TOKEN, chat_ids, "✅ Power ON detected!")
-            power_off_notified = False
+
+            await notify(client, "✅ Power ON detected!")
+            state.power_off_notified = False
 
 
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(monitor())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    client = httpx.AsyncClient()
+
+    poll_task = asyncio.create_task(telegram_polling(client))
+    monitor_task = asyncio.create_task(monitor(client))
+
+    yield
+
+    state.stop_event.set()
+
+    poll_task.cancel()
+    monitor_task.cancel()
+
+    await client.aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/ping")
 async def ping():
-    global last_ping
-    last_ping = datetime.utcnow()
-    # notify(TELEGRAM_TOKEN, chat_ids, "📶 Ping received!")
+
+    state.last_ping = datetime.now(timezone.utc)
+
     return {"status": "ok"}
